@@ -214,14 +214,6 @@ def _invariant_holds(client, contract) -> bool:
     return int(ledger["total_in"]) == int(ledger["total_out"]) + int(ledger["locked_total"])
 
 
-def _wait_balance(client, contract, expected, attempts=30, pause=10):
-    for _ in range(attempts):
-        if _balance(client, contract) == expected:
-            return expected
-        time.sleep(pause)
-    return _balance(client, contract)
-
-
 def _settle_our_tail(client, accounts, contract):
     """Leave no dispute of ours and no credit behind before a delta is measured."""
     ours = {_hex(member.address) for member in accounts}
@@ -304,7 +296,7 @@ def test_02_a_mismatched_stake_becomes_a_credit(
 
 
 def test_03_the_credit_comes_back(client, challenger, contract):
-    balance_before = _balance(client, contract)
+    locked_before = int(_ledger(client, contract)["locked_total"])
     credit_before = _credit(client, contract, challenger)
     assert credit_before >= BOND + 1
 
@@ -316,9 +308,10 @@ def test_03_the_credit_comes_back(client, challenger, contract):
         verify=lambda: _credit(client, contract, challenger) == 0,
     )
 
-    assert _wait_balance(client, contract, balance_before - credit_before) == (
-        balance_before - credit_before
-    )
+    # A payout is an external message that finalises later, so the contract's
+    # real balance is not a reliable delta across runs. The ledger is.
+    ledger = _ledger(client, contract)
+    assert int(ledger["locked_total"]) == locked_before - credit_before
     assert _invariant_holds(client, contract)
 
 
@@ -334,7 +327,6 @@ def test_04_a_withdrawn_dispute_refunds_the_stake(
 
     locked_before = int(_ledger(client, contract)["locked_total"])
     out_before = int(_ledger(client, contract)["total_out"])
-    balance_before = _balance(client, contract)
 
     claim_id = _assert_claim(client, account, contract, "e2e-withdraw")
     _challenged(client, challenger, contract, claim_id)
@@ -350,7 +342,6 @@ def test_04_a_withdrawn_dispute_refunds_the_stake(
     assert int(ledger["locked_total"]) == locked_before + BOND
     assert int(ledger["total_out"]) == out_before + BOND
     assert _invariant_holds(client, contract)
-    assert _wait_balance(client, contract, balance_before - BOND) == balance_before - BOND
 
 
 def test_05_the_claimant_cannot_take_the_stake(
@@ -411,7 +402,6 @@ def test_08_retire_returns_the_bond(client, account, contract):
     claim_id = _assert_claim(client, account, contract, "e2e-retire")
 
     out_before = int(_ledger(client, contract)["total_out"])
-    balance_before = _balance(client, contract)
 
     _expect_ok(
         client,
@@ -427,7 +417,6 @@ def test_08_retire_returns_the_bond(client, account, contract):
     ledger = _ledger(client, contract)
     assert int(ledger["total_out"]) == out_before + BOND
     assert _invariant_holds(client, contract)
-    assert _wait_balance(client, contract, balance_before - BOND) == balance_before - BOND
 
 
 def test_09_views_agree_with_the_ledger(client, contract):

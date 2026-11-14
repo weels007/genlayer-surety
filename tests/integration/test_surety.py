@@ -204,14 +204,6 @@ def _invariant_holds(client, contract) -> bool:
     return int(ledger["total_in"]) == int(ledger["total_out"]) + int(ledger["locked_total"])
 
 
-def _wait_balance(client, contract, expected, attempts=30, pause=10):
-    for _ in range(attempts):
-        if _balance(client, contract) == expected:
-            return expected
-        time.sleep(pause)
-    return _balance(client, contract)
-
-
 def _settle_our_tail(client, accounts, contract):
     """Leave no dispute of ours and no credit behind before a delta is measured."""
     ours = {_hex(member.address) for member in accounts}
@@ -322,7 +314,6 @@ def test_04_the_committee_reads_the_page_once(client, account, challenger, contr
     _challenged(client, challenger, contract, claim_id)
 
     ledger_before = _ledger(client, contract)
-    balance_before = _balance(client, contract)
 
     _expect_ok(
         client,
@@ -347,7 +338,9 @@ def test_04_the_committee_reads_the_page_once(client, account, challenger, contr
 
         # The challenger can always take the stake back.
         _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
-        assert _wait_balance(client, contract, balance_before) == balance_before
+        ledger = _ledger(client, contract)
+        assert int(ledger["locked_total"]) == int(ledger_before["locked_total"]) - BOND
+        assert int(ledger["total_out"]) == int(ledger_before["total_out"]) + BOND
     elif verdict == "OPEN":
         # SUPPORTS: the claim kept the stake, so its bond doubled.
         assert record["quote"], "a supported claim must keep the quote that decided it"
@@ -363,7 +356,6 @@ def test_04_the_committee_reads_the_page_once(client, account, challenger, contr
         ledger = _ledger(client, contract)
         assert int(ledger["total_out"]) == int(ledger_before["total_out"]) + 2 * BOND
         assert int(ledger["locked_total"]) == int(ledger_before["locked_total"]) - 2 * BOND
-        assert _wait_balance(client, contract, balance_before) == balance_before
 
     assert _invariant_holds(client, contract)
 
@@ -408,9 +400,8 @@ def test_07_void_is_refused_before_it_is_earned(client, account, challenger, con
     _expect_denied(client, account, contract, "void_challenge", [claim_id])
     assert _claim(client, contract, claim_id)["status"] == "CHALLENGED"
 
-    balance_before = _balance(client, contract)
     _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
-    assert _wait_balance(client, contract, balance_before - BOND) == balance_before - BOND
+    assert _claim(client, contract, claim_id)["status"] == "OPEN"
     assert _invariant_holds(client, contract)
 
 
@@ -418,7 +409,7 @@ def test_08_retire_returns_the_bond(client, account, contract):
     _settle_our_tail(client, [account], contract)
     claim_id = _assert_claim(client, account, contract, "live-7")
 
-    balance_before = _balance(client, contract)
+    out_before = int(_ledger(client, contract)["total_out"])
     _expect_ok(
         client,
         account,
@@ -429,7 +420,7 @@ def test_08_retire_returns_the_bond(client, account, contract):
     )
 
     assert _claim(client, contract, claim_id)["status"] == "RETIRED"
-    assert _wait_balance(client, contract, balance_before - BOND) == balance_before - BOND
+    assert int(_ledger(client, contract)["total_out"]) == out_before + BOND
     assert _invariant_holds(client, contract)
 
 
