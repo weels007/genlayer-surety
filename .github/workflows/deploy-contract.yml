@@ -1,0 +1,70 @@
+name: Deploy Contract
+
+# Deploys Surety once and records the address in deployment.json. The contract
+# has no constructor arguments and no owner, so a push that does not change the
+# source reuses the recorded deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Deploy again and replace the recorded address"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "contracts/Surety.py"
+      - "scripts/deploy.py"
+      - "scripts/wallet.py"
+      - ".github/workflows/deploy-contract.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-contract
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy once and record the address
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Check the wallet secrets
+        id: secrets
+        run: |
+          if [ -z "${{ secrets.SURETY_DEPLOYER_KEYSTORE }}" ] && [ -z "${{ secrets.GAUNTLET_DEPLOYER_KEYSTORE }}" ]; then
+            echo "::notice title=Deploy skipped::Add SURETY_DEPLOYER_KEYSTORE and SURETY_DEPLOYER_PASSWORD (or the same pair under the GAUNTLET_ prefix), then run this workflow again."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy
+        if: steps.secrets.outputs.skip != 'true'
+        env:
+          SURETY_DEPLOYER_KEYSTORE: ${{ secrets.SURETY_DEPLOYER_KEYSTORE }}
+          SURETY_DEPLOYER_PASSWORD: ${{ secrets.SURETY_DEPLOYER_PASSWORD }}
+          GAUNTLET_DEPLOYER_KEYSTORE: ${{ secrets.GAUNTLET_DEPLOYER_KEYSTORE }}
+          GAUNTLET_DEPLOYER_PASSWORD: ${{ secrets.GAUNTLET_DEPLOYER_PASSWORD }}
+        run: python scripts/deploy.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Record the address
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ -z "$(git status --porcelain deployment.json)" ]; then
+            echo "deployment.json is unchanged; nothing to record"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment.json
+          git commit -m "Record the deployed Surety address"
+          git push

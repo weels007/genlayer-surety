@@ -1,0 +1,72 @@
+name: Integration (studionet)
+
+# Real-network check against the PINNED contract in deployment.json: a bond, a
+# dispute, and a judgement by the live committee on a page that really exists.
+#
+# Needs a wallet pair: SURETY_DEPLOYER_KEYSTORE / SURETY_DEPLOYER_PASSWORD, or the
+# same pair under the GAUNTLET_ prefix. A second pair (SURETY_TESTER2_… or
+# GAUNTLET_TESTER2_…) makes the "stranger" cases run for real. Until the first
+# pair exists the job skips with a notice.
+
+on:
+  workflow_dispatch:
+
+  # A deploy commits deployment.json with the workflow token, and a push made
+  # with that token never starts another workflow. workflow_run is the supported
+  # chain.
+  workflow_run:
+    workflows: ["Deploy Contract"]
+    types: [completed]
+
+  push:
+    paths:
+      - "tests/integration/**"
+      - "deployment.json"
+      - ".github/workflows/integration.yml"
+
+# The live suites share one concurrency group: both move money on the same
+# deployed contract, so running them at once would interleave the ledger deltas
+# they assert on.
+concurrency:
+  group: live-suite
+  cancel-in-progress: false
+
+jobs:
+  studionet:
+    name: Studio-mode tests
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Check the wallet secrets
+        id: secrets
+        run: |
+          if [ -z "${{ secrets.SURETY_DEPLOYER_KEYSTORE }}" ] && [ -z "${{ secrets.GAUNTLET_DEPLOYER_KEYSTORE }}" ]; then
+            echo "::notice title=Studio suite skipped::Add SURETY_DEPLOYER_KEYSTORE and SURETY_DEPLOYER_PASSWORD (or the GAUNTLET_ pair) to drive the deployed contract."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Studio suite
+        if: steps.secrets.outputs.skip != 'true'
+        env:
+          SURETY_DEPLOYER_KEYSTORE: ${{ secrets.SURETY_DEPLOYER_KEYSTORE }}
+          SURETY_DEPLOYER_PASSWORD: ${{ secrets.SURETY_DEPLOYER_PASSWORD }}
+          GAUNTLET_DEPLOYER_KEYSTORE: ${{ secrets.GAUNTLET_DEPLOYER_KEYSTORE }}
+          GAUNTLET_DEPLOYER_PASSWORD: ${{ secrets.GAUNTLET_DEPLOYER_PASSWORD }}
+          # The "stranger" case needs a genuinely different account. Without this
+          # pair the second name resolves to the deployer and the case skips.
+          SURETY_TESTER2_KEYSTORE: ${{ secrets.SURETY_TESTER2_KEYSTORE }}
+          SURETY_TESTER2_PASSWORD: ${{ secrets.SURETY_TESTER2_PASSWORD }}
+          SURETY_TESTER_KEYSTORE2: ${{ secrets.SURETY_TESTER_KEYSTORE2 }}
+          SURETY_TESTER_PASSWORD2: ${{ secrets.SURETY_TESTER_PASSWORD2 }}
+          GAUNTLET_TESTER2_KEYSTORE: ${{ secrets.GAUNTLET_TESTER2_KEYSTORE }}
+          GAUNTLET_TESTER2_PASSWORD: ${{ secrets.GAUNTLET_TESTER2_PASSWORD }}
+          GAUNTLET_TESTER_KEYSTORE2: ${{ secrets.GAUNTLET_TESTER_KEYSTORE2 }}
+          GAUNTLET_TESTER_PASSWORD2: ${{ secrets.GAUNTLET_TESTER_PASSWORD2 }}
+        run: pytest tests/integration -v -s -rs
