@@ -235,7 +235,10 @@ def test_each_defence_doubles_the_price_of_disagreement(
     record = contract.get_claim(claim_id)
     assert record["status"] == "CHALLENGED"
     assert record["stake"] == 2 * BOND
-    assert contract.get_ledger()["locked_total"] == 4 * BOND
+
+    # The bond (now 2B), the mismatched stake held as a credit (B), and the
+    # matched stake (2B) are all still inside the contract.
+    assert contract.get_ledger()["locked_total"] == 5 * BOND
 
 
 def test_a_claim_becomes_final_after_enough_defences(
@@ -291,6 +294,8 @@ def test_the_ledger_stays_balanced_through_a_full_round(
     contract.challenge(claim_id)
     direct_vm.value = 0
 
+    direct_vm.clear_mocks()
+    _mock_page(direct_vm)
     _mock_judge(direct_vm, "CONTRADICTS", quote="The repository is public")
     direct_vm.sender = direct_alice
     contract.judge(claim_id)

@@ -718,6 +718,7 @@ Rules:
         claim.has_challenger = False
         claim.challenger = claim.claimant
         claim.stake = u256(0)
+        claim.attempts = u32(0)
         claim.reason = "the committee could not decide this claim"
         claim.deadline = u256(_now_ts() + int(claim.window_seconds))
         self.claims[claim_id] = claim
