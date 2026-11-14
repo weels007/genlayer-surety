@@ -424,7 +424,74 @@ def test_08_retire_returns_the_bond(client, account, contract):
     assert _invariant_holds(client, contract)
 
 
-def test_09_views_agree_with_the_ledger(client, contract):
+# ---------------------------------------------------------------------------
+# the two verdicts a live run rarely produces
+# ---------------------------------------------------------------------------
+
+TRUE_CLAIM = (
+    "The project is an Intelligent Contract for GenLayer that reads evidence from "
+    "the web and settles a promise with a quote."
+)
+FALSE_CLAIM = (
+    "The project has no documentation at all and publishes no README file."
+)
+
+
+def test_09_a_supported_and_a_contradicted_claim(
+    client, account, challenger, contract
+):
+    """Give SUPPORTS and CONTRADICTS a real chance, and report what came back.
+
+    A live committee cannot be ordered to return a particular verdict, so each
+    probe asserts the law for whichever verdict appears: a supported claim keeps
+    the stake and doubles, a contradicted one pays the challenger the pot, and a
+    silent one decides nothing. The verdicts this run actually produced are
+    printed, so a reader can see which branches this deployment has demonstrated.
+    """
+    _settle_our_tail(client, [account, challenger], contract)
+
+    seen = []
+    for label, claim_text in (("supported", TRUE_CLAIM), ("contradicted", FALSE_CLAIM)):
+        claim_id = _assert_claim(
+            client, account, contract, f"probe-{label}", text=claim_text
+        )
+        _challenged(client, challenger, contract, claim_id)
+        ledger_before = _ledger(client, contract)
+
+        _expect_ok(
+            client,
+            account,
+            contract,
+            "judge",
+            [claim_id],
+            verify=lambda: int(_claim(client, contract, claim_id)["attempts"]) > 0,
+        )
+
+        record = _claim(client, contract, claim_id)
+        seen.append((label, record["status"]))
+        print(f"  the {label} probe returned {record['status']!r}")
+
+        if record["status"] == "OPEN":
+            # SUPPORTS: the claim kept the stake, so its bond doubled.
+            assert record["quote"], "a supported claim must keep its quote"
+            assert int(record["bond"]) == 2 * BOND
+            assert int(record["rounds"]) == 1
+        elif record["status"] == "REFUTED":
+            # CONTRADICTS: the challenger took their stake back plus the bond.
+            assert record["quote"], "a contradicted claim must keep its quote"
+            ledger = _ledger(client, contract)
+            assert int(ledger["total_out"]) == int(ledger_before["total_out"]) + 2 * BOND
+        else:
+            # SILENT: the page did not decide it, so nothing moved.
+            assert record["status"] == "CHALLENGED", record
+            _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
+
+        assert _invariant_holds(client, contract)
+
+    print(f"  verdicts this run: {seen}")
+
+
+def test_10_views_agree_with_the_ledger(client, contract):
     summary = _read(client, contract, "get_summary")
     claims = _read(client, contract, "get_claims")
 
