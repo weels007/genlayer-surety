@@ -108,6 +108,18 @@ def test_the_window_must_be_within_range(direct_vm, direct_deploy, direct_alice)
     assert contract.get_claim_ids()["ids"] == []
 
 
+def test_a_zero_bond_is_a_plain_revert(direct_vm, direct_deploy, direct_alice):
+    contract = _deployed(direct_deploy)
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 0
+    with direct_vm.expect_revert("[EXPECTED]:zero_bond"):
+        contract.assert_claim(CLAIM, URL, WINDOW, "ref-1")
+
+    assert contract.get_claim_ids()["ids"] == []
+    assert contract.get_credit(direct_alice) == 0
+
+
 def test_a_missing_reference_is_refused(direct_vm, direct_deploy, direct_alice):
     contract = _deployed(direct_deploy)
 

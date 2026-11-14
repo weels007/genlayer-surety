@@ -82,6 +82,21 @@ def test_nobody_challenges_their_own_claim(
     assert contract.get_claim(claim_id)["status"] == "OPEN"
 
 
+def test_a_zero_stake_is_a_plain_revert(
+    direct_vm, direct_deploy, direct_alice, direct_bob
+):
+    contract = _deployed(direct_deploy)
+    claim_id = _stated(direct_vm, contract, direct_alice)
+
+    direct_vm.sender = direct_bob
+    direct_vm.value = 0
+    with direct_vm.expect_revert("[EXPECTED]:zero_stake"):
+        contract.challenge(claim_id)
+
+    assert contract.get_claim(claim_id)["status"] == "OPEN"
+    assert contract.get_credit(direct_bob) == 0
+
+
 def test_an_unknown_claim_becomes_a_credit(
     direct_vm, direct_deploy, direct_bob
 ):
