@@ -1,0 +1,8 @@
+{
+  "contract": "Surety",
+  "network": "GenLayer Studio (61999)",
+  "address": "0xB4ecFD861573f6A9214e3F5d16036B2245f746aC",
+  "revision": "3a8ad13717fc",
+  "explorer": "https://explorer-studio.genlayer.com/address/0xB4ecFD861573f6A9214e3F5d16036B2245f746aC",
+  "min_bond": 100
+}
