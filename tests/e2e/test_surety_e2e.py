@@ -39,6 +39,11 @@ WINDOW = 3600
 SOURCE_URL = "https://raw.githubusercontent.com/weels007/genlayer-vow/main/README.md"
 CLAIM_TEXT = "The project documents how a stranger can install and run it."
 
+# The contract records a reference per claimant forever, so a re-run must not
+# reuse the last run's references: the assertion would be refused as a duplicate
+# and become a credit.
+RUN = str(time.time_ns())
+
 
 # ---------------------------------------------------------------------------
 # fixtures
@@ -243,7 +248,7 @@ def _assert_claim(client, account, contract, ref):
         account,
         contract,
         "assert_claim",
-        [CLAIM_TEXT, SOURCE_URL, WINDOW, ref],
+        [CLAIM_TEXT, SOURCE_URL, WINDOW, f"{ref}-{RUN}"],
         value=BOND,
         verify=lambda: len(_claim_ids(client, contract)) > before,
     )
