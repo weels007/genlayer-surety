@@ -4,6 +4,10 @@ The contract has no owner and no reset, so every assertion is a delta — a coun
 a balance, a ledger total compared before and after — and the suite tolerates
 claims and credits left behind by an earlier run.
 
+A claim is asserted by one account and disputed by another, because the contract
+refuses to let a claimant challenge their own claim; the two roles cannot be
+played by the same wallet, even in a test.
+
 The claim in this suite is about a page that really exists, so the live committee
 has something concrete to read. Its verdict may go any of three ways, and each
 one has a law attached: a supported claim keeps the stake and doubles, a
@@ -24,7 +28,7 @@ from genlayer_py import create_client, studionet
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from wallet import load_account, named_env_present  # noqa: E402
+from wallet import load_account  # noqa: E402
 
 DEPLOYMENT_PATH = ROOT / "deployment.json"
 ADDRESS_VALUE = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -71,14 +75,18 @@ def account():
 
 
 @pytest.fixture(scope="module")
-def stranger(account):
-    """A genuinely different signer, or None when the repository has only one."""
+def challenger(account):
+    """A second funded account. Without one, disputes cannot be exercised.
+
+    The contract refuses a claimant's own challenge and turns it into a credit,
+    so a suite that challenged with the claimant's wallet would prove nothing.
+    """
     try:
         other = load_account("tester2")
     except SystemExit:
-        return None
+        pytest.skip("no second wallet is configured; a challenge would be a self-challenge")
     if _hex(other.address) == _hex(account.address):
-        return None
+        pytest.skip("the second wallet is the deployer; a challenge would be a self-challenge")
     return other
 
 
@@ -199,18 +207,23 @@ def _wait_balance(client, contract, expected, attempts=30, pause=10):
     return _balance(client, contract)
 
 
-def _settle_our_tail(client, account, contract):
+def _settle_our_tail(client, accounts, contract):
     """Leave no dispute of ours and no credit behind before a delta is measured."""
+    ours = {_hex(member.address) for member in accounts}
     for claim_id in _claim_ids(client, contract):
         record = _claim(client, contract, claim_id)
         if record["status"] != "CHALLENGED":
             continue
-        if _hex(record["challenger"]) != _hex(account.address):
+        if _hex(record["challenger"]) not in ours:
             pytest.skip("another account holds an open dispute")
-        _expect_ok(client, account, contract, "withdraw_challenge", [claim_id])
+        who = next(
+            member for member in accounts if _hex(member.address) == _hex(record["challenger"])
+        )
+        _expect_ok(client, who, contract, "withdraw_challenge", [claim_id])
 
-    if _credit(client, contract, account) > 0:
-        _expect_ok(client, account, contract, "withdraw_credit")
+    for member in accounts:
+        if _credit(client, contract, member) > 0:
+            _expect_ok(client, member, contract, "withdraw_credit")
 
 
 def _assert_claim(client, account, contract, ref, text=CLAIM_TEXT, url=SOURCE_URL):
@@ -227,6 +240,17 @@ def _assert_claim(client, account, contract, ref, text=CLAIM_TEXT, url=SOURCE_UR
     ids = _claim_ids(client, contract)
     assert len(ids) > before, "the claim was not created"
     return ids[-1]
+
+
+def _challenged(client, challenger, contract, claim_id):
+    """Challenge with the other account, and prove the dispute really opened."""
+    _expect_ok(client, challenger, contract, "challenge", [claim_id], value=BOND)
+    record = _claim(client, contract, claim_id)
+    assert record["status"] == "CHALLENGED", (
+        "the challenge did not open a dispute — a refused payable call answers "
+        f"'credit' instead of reverting: {record}"
+    )
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +273,7 @@ def test_01_the_registry_is_live(client, contract):
 
 
 def test_02_a_claim_locks_its_bond(client, account, contract):
-    _settle_our_tail(client, account, contract)
+    _settle_our_tail(client, [account], contract)
 
     ledger_before = _ledger(client, contract)
     claim_id = _assert_claim(client, account, contract, "live-1")
@@ -266,48 +290,31 @@ def test_02_a_claim_locks_its_bond(client, account, contract):
     assert _invariant_holds(client, contract)
 
 
-def test_03_a_challenge_matches_the_bond(client, account, contract):
-    _settle_our_tail(client, account, contract)
+def test_03_a_challenge_matches_the_bond(client, account, challenger, contract):
+    _settle_our_tail(client, [account, challenger], contract)
     claim_id = _assert_claim(client, account, contract, "live-2")
 
     # A stake that does not match is a credit, not a dispute.
-    _expect_ok(client, account, contract, "challenge", [claim_id], value=BOND - 1)
-    assert _credit(client, contract, account) >= BOND - 1
+    _expect_ok(client, challenger, contract, "challenge", [claim_id], value=BOND - 1)
+    assert _credit(client, contract, challenger) >= BOND - 1
     assert _claim(client, contract, claim_id)["status"] == "OPEN"
 
     ledger_before = _ledger(client, contract)
-    _expect_ok(
-        client,
-        account,
-        contract,
-        "challenge",
-        [claim_id],
-        value=BOND,
-        verify=lambda: _claim(client, contract, claim_id)["status"] == "CHALLENGED",
-    )
+    record = _challenged(client, challenger, contract, claim_id)
 
-    record = _claim(client, contract, claim_id)
     assert record["challenged"] is True
     assert int(record["stake"]) == BOND
+    assert _hex(record["challenger"]) == _hex(challenger.address)
 
     ledger = _ledger(client, contract)
     assert int(ledger["locked_total"]) == int(ledger_before["locked_total"]) + BOND
     assert _invariant_holds(client, contract)
 
 
-def test_04_the_committee_reads_the_page_once(client, account, contract):
-    _settle_our_tail(client, account, contract)
+def test_04_the_committee_reads_the_page_once(client, account, challenger, contract):
+    _settle_our_tail(client, [account, challenger], contract)
     claim_id = _assert_claim(client, account, contract, "live-3")
-
-    _expect_ok(
-        client,
-        account,
-        contract,
-        "challenge",
-        [claim_id],
-        value=BOND,
-        verify=lambda: _claim(client, contract, claim_id)["status"] == "CHALLENGED",
-    )
+    _challenged(client, challenger, contract, claim_id)
 
     ledger_before = _ledger(client, contract)
     balance_before = _balance(client, contract)
@@ -334,7 +341,7 @@ def test_04_the_committee_reads_the_page_once(client, account, contract):
         assert int(ledger["total_out"]) == int(ledger_before["total_out"])
 
         # The challenger can always take the stake back.
-        _expect_ok(client, account, contract, "withdraw_challenge", [claim_id])
+        _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
         assert _wait_balance(client, contract, balance_before) == balance_before
     elif verdict == "OPEN":
         # SUPPORTS: the claim kept the stake, so its bond doubled.
@@ -361,35 +368,23 @@ def test_04_the_committee_reads_the_page_once(client, account, contract):
 # ---------------------------------------------------------------------------
 
 
-def test_05_a_stranger_cannot_take_the_stake(client, account, contract, stranger):
-    if stranger is None:
-        pytest.skip("only one wallet is configured, so a stranger would be the deployer")
-
-    _settle_our_tail(client, account, contract)
+def test_05_a_stranger_cannot_take_the_stake(client, account, challenger, contract):
+    _settle_our_tail(client, [account, challenger], contract)
     claim_id = _assert_claim(client, account, contract, "live-4")
+    _challenged(client, challenger, contract, claim_id)
 
-    _expect_ok(
-        client,
-        account,
-        contract,
-        "challenge",
-        [claim_id],
-        value=BOND,
-        verify=lambda: _claim(client, contract, claim_id)["status"] == "CHALLENGED",
-    )
-
-    touched = _attempt(client, stranger, contract, "withdraw_challenge", [claim_id])
+    # The claimant is a stranger to the dispute: only the challenger may take
+    # the stake back.
+    touched = _attempt(client, account, contract, "withdraw_challenge", [claim_id])
     assert not _succeeded(touched), "a stranger withdrew somebody else's stake"
     assert _claim(client, contract, claim_id)["status"] == "CHALLENGED"
 
-    _expect_ok(client, account, contract, "withdraw_challenge", [claim_id])
+    _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
     assert _claim(client, contract, claim_id)["status"] == "OPEN"
 
 
-def test_06_a_claim_cannot_be_challenged_by_its_own_claimant(
-    client, account, contract
-):
-    _settle_our_tail(client, account, contract)
+def test_06_a_claimant_cannot_challenge_their_own_claim(client, account, contract):
+    _settle_our_tail(client, [account], contract)
     claim_id = _assert_claim(client, account, contract, "live-5")
 
     _expect_ok(client, account, contract, "challenge", [claim_id], value=BOND)
@@ -400,31 +395,22 @@ def test_06_a_claim_cannot_be_challenged_by_its_own_claimant(
     _expect_ok(client, account, contract, "withdraw_credit")
 
 
-def test_07_void_is_refused_before_it_is_earned(client, account, contract):
-    _settle_our_tail(client, account, contract)
+def test_07_void_is_refused_before_it_is_earned(client, account, challenger, contract):
+    _settle_our_tail(client, [account, challenger], contract)
     claim_id = _assert_claim(client, account, contract, "live-6")
-
-    _expect_ok(
-        client,
-        account,
-        contract,
-        "challenge",
-        [claim_id],
-        value=BOND,
-        verify=lambda: _claim(client, contract, claim_id)["status"] == "CHALLENGED",
-    )
+    _challenged(client, challenger, contract, claim_id)
 
     _expect_denied(client, account, contract, "void_challenge", [claim_id])
     assert _claim(client, contract, claim_id)["status"] == "CHALLENGED"
 
     balance_before = _balance(client, contract)
-    _expect_ok(client, account, contract, "withdraw_challenge", [claim_id])
+    _expect_ok(client, challenger, contract, "withdraw_challenge", [claim_id])
     assert _wait_balance(client, contract, balance_before - BOND) == balance_before - BOND
     assert _invariant_holds(client, contract)
 
 
 def test_08_retire_returns_the_bond(client, account, contract):
-    _settle_our_tail(client, account, contract)
+    _settle_our_tail(client, [account], contract)
     claim_id = _assert_claim(client, account, contract, "live-7")
 
     balance_before = _balance(client, contract)
