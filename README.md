@@ -36,11 +36,11 @@ economics and the failure modes:
 
 `deployment.json` is the single source of truth for the deployed address: the
 **Deploy Contract** workflow deploys the registry once, writes the file, and
-commits it back to `main`. Until it exists, nothing is deployed.
+commits it back to `main`.
 
 | | |
 |---|---|
-| **Contract** | see `deployment.json` — written by the Deploy Contract workflow |
+| **Contract** | [`0xB4ecFD861573f6A9214e3F5d16036B2245f746aC`](https://explorer-studio.genlayer.com/address/0xB4ecFD861573f6A9214e3F5d16036B2245f746aC) |
 | **Network** | GenLayer Studio — chainId `61999` (`0xf22f`), test GEN only |
 | **Evidence** | [Actions](https://github.com/weels007/genlayer-surety/actions) — the direct suite, the Studio suite, the money paths, and every deployment |
 
