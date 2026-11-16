@@ -44,6 +44,11 @@ commits it back to `main`.
 | **Network** | GenLayer Studio — chainId `61999` (`0xf22f`), test GEN only |
 | **Evidence** | [Actions](https://github.com/weels007/genlayer-surety/actions) — the direct suite, the Studio suite, the money paths, and every deployment |
 
+The address above is checked against this repository: `scripts/verify_deployment.py`
+compares the recorded `revision` — the first twelve characters of the SHA-256 of
+`contracts/Surety.py`, written by the deploy script — with the checkout, and the
+money-paths workflow refuses to run when the two disagree.
+
 ## Lifecycle
 
 ```mermaid
@@ -161,7 +166,7 @@ Residual risks, stated plainly:
 | Suite | What it covers | Run |
 |---|---|---|
 | **Direct** | bonds, references, the window, every refusal, the challenge and withdrawal paths, all three verdicts, doubling, the attempt cap and the ledger invariant | `pytest tests/direct -v` |
-| **Studio** | the deployed registry: a real bond, a real challenge, a judgement by the live committee on a page that exists, and the refusals | `pytest tests/integration -v -s` |
+| **Studio** | the deployed registry: a real bond, a real challenge, a judgement by the live committee on a page that exists, a dispute against an ungroundable page judged three times and then voided, and the refusals | `pytest tests/integration -v -s` |
 | **End to end** | the money paths around the judgement: a mismatched stake as a credit, a withdrawn dispute, a claimant challenging themselves, the void guard, retirement, and a stranger reaching for a stake that is not theirs | `pytest tests/e2e -v -s` |
 
 Every assertion in the live suites is a delta — a count, a balance, a ledger total
@@ -194,7 +199,9 @@ contracts/Surety.py              the claim registry
 tests/direct/                    bonds, challenges, judgements, consensus
 tests/integration/               the deployed registry, live
 tests/e2e/                       the deployed registry's money paths
+testdata/ungroundable.txt        a page no quote can be grounded in
 scripts/deploy.py                deploys once, records deployment.json
+scripts/verify_deployment.py     the address on file is this contract
 scripts/wallet.py                keystore from tests/ or a repository secret
 deployment.json                  the deployed address (written by the workflow)
 .github/workflows/ci.yml         genvm-lint + the direct suite

@@ -36,10 +36,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A workflow_run checks out the commit that triggered the deploy, which
+          # is older than the deployment.json the bot commits; test main instead.
+          ref: ${{ github.event_name == 'workflow_run' && 'main' || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+
+      - name: The recorded address is this contract
+        run: python scripts/verify_deployment.py
 
       - name: Check the wallet secrets
         id: secrets

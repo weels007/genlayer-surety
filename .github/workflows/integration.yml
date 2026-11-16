@@ -39,6 +39,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A workflow_run checks out the commit that triggered the deploy, which
+          # is older than the deployment.json the bot commits; test main instead.
+          ref: ${{ github.event_name == 'workflow_run' && 'main' || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

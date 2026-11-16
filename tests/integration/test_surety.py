@@ -12,7 +12,9 @@ The claim in this suite is about a page that really exists, so the live committe
 has something concrete to read. Its verdict may go any of three ways, and each
 one has a law attached: a supported claim keeps the stake and doubles, a
 contradicted one is paid out to the challenger, and a page that says nothing
-decides nothing.
+decides nothing. A dispute against a page no quote can be grounded in is judged
+three times without a verdict and then voided by the claimant, which is the refund
+path on demand.
 
     pytest tests/integration -v -s
 """
@@ -40,6 +42,13 @@ RETRY_PAUSE = 20
 BOND = 100
 WINDOW = 3600
 SOURCE_URL = "https://raw.githubusercontent.com/weels007/genlayer-vow/main/README.md"
+# A page whose whole text folds to nineteen letters, one short of what a quote
+# needs to ground: no verdict taken from it can settle a dispute, so a claim filed
+# against it is judged three times without a decision and then voided.
+UNGROUNDABLE_URL = (
+    "https://raw.githubusercontent.com/weels007/genlayer-surety/main/"
+    "testdata/ungroundable.txt"
+)
 CLAIM_TEXT = "The project documents how a stranger can install and run it."
 
 # The contract records a reference per claimant forever, so a re-run must not
@@ -491,7 +500,56 @@ def test_09_a_supported_and_a_contradicted_claim(
     print(f"  verdicts this run: {seen}")
 
 
-def test_10_views_agree_with_the_ledger(client, contract):
+def test_10_an_undecidable_dispute_is_voided(client, account, challenger, contract):
+    """A page no quote can be grounded in: three attempts, then the stake back."""
+    _settle_our_tail(client, [account, challenger], contract)
+
+    claim_id = _assert_claim(client, account, contract, "live-void", url=UNGROUNDABLE_URL)
+    _challenged(client, challenger, contract, claim_id)
+
+    for attempt in range(3):
+        before = int(_claim(client, contract, claim_id)["attempts"])
+        _expect_ok(
+            client,
+            account,
+            contract,
+            "judge",
+            [claim_id],
+            verify=lambda: int(_claim(client, contract, claim_id)["attempts"]) > before,
+        )
+
+        record = _claim(client, contract, claim_id)
+        assert record["status"] == "CHALLENGED", (
+            f"the committee decided a page that cannot ground a quote: {record}"
+        )
+        assert int(record["attempts"]) == before + 1, record
+        assert record["quote"] == "", record
+
+    ledger_before = _ledger(client, contract)
+
+    # Anyone may void it, so the claimant does — the stake still goes back to the
+    # challenger, which is the point of the method.
+    _expect_ok(
+        client,
+        account,
+        contract,
+        "void_challenge",
+        [claim_id],
+        verify=lambda: _claim(client, contract, claim_id)["status"] == "OPEN",
+    )
+
+    record = _claim(client, contract, claim_id)
+    assert record["status"] == "OPEN"
+    assert int(record["stake"]) == 0
+    assert int(record["bond"]) == BOND
+
+    ledger = _ledger(client, contract)
+    assert int(ledger["total_out"]) == int(ledger_before["total_out"]) + BOND
+    assert int(ledger["locked_total"]) == int(ledger_before["locked_total"]) - BOND
+    assert _invariant_holds(client, contract)
+
+
+def test_11_views_agree_with_the_ledger(client, contract):
     summary = _read(client, contract, "get_summary")
     claims = _read(client, contract, "get_claims")
 
